@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ebpf-udp-analyzer"
+version = "0.1.0"
+description = "Universal eBPF UDP traffic analyzer with Python user space and checkpointed storage."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "ebpf-udp-analyzer contributors" }
+]
+
+[project.optional-dependencies]
+duckdb = ["duckdb>=1.0"]
+
+[project.scripts]
+udp-analyzer = "udp_analyzer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

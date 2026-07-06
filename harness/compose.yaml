@@ -1,0 +1,11 @@
+services:
+  ffmpeg-receivers:
+    image: linuxserver/ffmpeg:latest
+    command: ["/harness/start_ffmpeg.sh"]
+    volumes:
+      - .:/harness:ro
+    ports:
+      - "5000:5000/udp"
+      - "5001:5001/udp"
+      - "5002:5002/udp"
+
