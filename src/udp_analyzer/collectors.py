@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Protocol
 
+from .ebpf import EbpfIngressCollector
 from .models import SampleFilter, UdpSample, bucket_start_ns
+from .processes import ProcessSocketEnricher
 
 
 class Collector(Protocol):
     def read_checkpoint(self) -> list[UdpSample]:
         """Return delta samples for one checkpoint."""
+
+    def close(self) -> None:
+        """Release collector resources."""
 
 
 @dataclass(frozen=True)
@@ -114,16 +120,31 @@ class DryRunCollector:
 
         return samples
 
+    def close(self) -> None:
+        return None
 
-class EbpfCollector:
-    """Placeholder for the real eBPF map-draining collector."""
 
-    def __init__(self, bucket_ms: int, sample_filter: Optional[SampleFilter] = None):
-        self.bucket_ms = bucket_ms
-        self.sample_filter = sample_filter or SampleFilter()
-
-    def read_checkpoint(self) -> list[UdpSample]:
-        raise RuntimeError(
-            "eBPF collector is not wired yet. Use --collector dry-run for now; "
-            "the first eBPF program lives in bpf/udp_ingress.bpf.c."
+class EbpfCollector(EbpfIngressCollector):
+    def __init__(
+        self,
+        bucket_ms: int,
+        sample_filter: Optional[SampleFilter] = None,
+        ifname: Optional[str] = None,
+        object_path: Path = Path("bpf/udp_ingress.bpf.o"),
+        section: str = "classifier/udp_ingress",
+        pref: int = 49152,
+        attach: bool = True,
+        detach_on_close: bool = True,
+        process_enricher: Optional[ProcessSocketEnricher] = None,
+    ):
+        super().__init__(
+            ifname=ifname,
+            object_path=object_path,
+            section=section,
+            pref=pref,
+            bucket_ms=bucket_ms,
+            sample_filter=sample_filter,
+            attach=attach,
+            detach_on_close=detach_on_close,
+            process_enricher=process_enricher,
         )

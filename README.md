@@ -1,5 +1,9 @@
 # ebpf-udp-analyzer
 
+![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)
+![eBPF](https://img.shields.io/badge/eBPF-enabled-orange)
+![Linux](https://img.shields.io/badge/platform-linux-green)
+
 Universal eBPF UDP traffic analyzer with Python user space, checkpointed storage,
 and a Docker/ffmpeg vertical harness.
 
@@ -20,14 +24,18 @@ Implemented now:
 - table and newline-delimited JSON output
 - SQLite writer using WAL mode
 - optional DuckDB writer
+- optional Parquet writer through DuckDB
 - ClickHouse HTTP JSONEachRow writer
 - first eBPF C program for IPv4 UDP ingress counters at `tc` classifier attach
+- eBPF collector that attaches with `tc`, drains counters with `bpftool`, and
+  emits checkpoint deltas
+- optional `/proc` socket/process enrichment for delivered-process rows
 - basic Docker/ffmpeg harness files
 
 Next implementation step:
 
-- wire the Python `ebpf` collector to load/attach `bpf/udp_ingress.bpf.c` and
-  drain `udp_ingress_counters`
+- extend process attribution beyond local-port correlation with receive-side
+  socket cookies or kprobe/fentry attribution
 
 ## Quick Start
 
@@ -81,6 +89,22 @@ Primary networked target:
 
 See `storage.md` for the full storage decision.
 
+Use SQLite:
+
+```sh
+PYTHONPATH=src python3 -m udp_analyzer run \
+  --storage sqlite \
+  --db-path data/udp_analyzer.sqlite
+```
+
+Use Parquet:
+
+```sh
+PYTHONPATH=src python3 -m udp_analyzer run \
+  --storage parquet \
+  --db-path data/udp_samples.parquet
+```
+
 ## eBPF Build Sketch
 
 The first eBPF program lives at `bpf/udp_ingress.bpf.c`.
@@ -91,8 +115,42 @@ On a Linux machine with clang and libbpf headers:
 make -C bpf
 ```
 
-This currently builds only the BPF object. Python loading/attaching is the next
-piece of implementation.
+Run the real eBPF collector on an interface:
+
+```sh
+PYTHONPATH=src python3 -m udp_analyzer run \
+  --collector ebpf \
+  --interface eth0 \
+  --watch \
+  --duration 10 \
+  --output json
+```
+
+Add process/socket enrichment from `/proc`:
+
+```sh
+PYTHONPATH=src python3 -m udp_analyzer run \
+  --collector ebpf \
+  --interface eth0 \
+  --watch \
+  --duration 10 \
+  --output json \
+  --enrich-processes
+```
+
+Filter enriched rows to one process name:
+
+```sh
+PYTHONPATH=src python3 -m udp_analyzer run \
+  --collector ebpf \
+  --interface eth0 \
+  --watch \
+  --duration 10 \
+  --output json \
+  --enrich-processes \
+  --process-name ffmpeg \
+  --layer delivered
+```
 
 For CloudLinux/RHEL-like systems:
 
@@ -112,6 +170,18 @@ make -C bpf
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+Run the dry-run harness:
+
+```sh
+DURATION=1 harness/run.sh dry-run
+```
+
+Run the eBPF harness on Linux:
+
+```sh
+INTERFACE=eth0 harness/run.sh ebpf
 ```
 
 ## Docs

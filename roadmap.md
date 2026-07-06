@@ -3,6 +3,27 @@
 This roadmap builds a universal eBPF UDP traffic analyzer first, then validates
 it against the Dockerized `ffmpeg` vertical described in `harness.md`.
 
+## Current Implementation Status
+
+Implemented:
+
+- Python CLI, output modes, filters, and checkpoint loop
+- dry-run collector for deterministic development
+- eBPF IPv4 UDP ingress counter program for `tc` classifier attach
+- Python eBPF collector using `tc` for attach and `bpftool` for map reads
+- checkpoint deltas from absolute per-CPU BPF counters
+- SQLite, DuckDB, Parquet, and ClickHouse writer interfaces
+- process/socket enrichment from `/proc` by local UDP port and socket inode
+- dry-run and eBPF harness runners with JSON assertions
+- CloudLinux/RHEL and Ubuntu/Debian bootstrap scripts
+
+Still open:
+
+- exact receive-side attribution by socket cookie or kprobe/fentry
+- full Dockerized ffmpeg automated vertical with real containers
+- robust same-port multi-process support such as `SO_REUSEPORT` or multicast
+- production-grade retention/rollover for Parquet and remote databases
+
 ## Phase 0: Project Skeleton
 
 Goal: create a buildable minimal project shape for a reusable analyzer.

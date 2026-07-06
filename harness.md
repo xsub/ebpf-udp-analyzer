@@ -64,18 +64,18 @@ than only through loopback.
 
 ## Required Components
 
-The harness should eventually provide these files:
+The harness provides these files:
 
 - `harness/compose.yaml`: starts the Docker test network and receiver container
 - `harness/start_ffmpeg.sh`: starts multiple labeled `ffmpeg` UDP receivers
 - `harness/send_udp.py`: sends deterministic UDP packet streams
-- `harness/run.sh`: starts receivers, starts the analyzer, sends traffic, and
+- `harness/run.sh`: starts the analyzer, optionally generates probe traffic, and
   stores analyzer output
 - `harness/assert_output.py`: checks analyzer output against expected packet and
   byte counts
 
-Until those scripts exist, this document is the source of truth for the manual
-test procedure.
+The Dockerized ffmpeg receiver setup is still evolving. The dry-run and eBPF
+probe harness paths are available now.
 
 ## Receiver Setup
 

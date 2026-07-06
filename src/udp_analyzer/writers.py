@@ -146,6 +146,48 @@ class DuckDBWriter:
         self.conn.close()
 
 
+class ParquetWriter:
+    def __init__(self, path: Path):
+        try:
+            import duckdb
+        except ImportError as exc:
+            raise RuntimeError(
+                "Parquet storage requires DuckDB: "
+                "pip install 'ebpf-udp-analyzer[duckdb]'"
+            ) from exc
+
+        self.duckdb = duckdb
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.rows: list[UdpSample] = []
+
+    def write_samples(self, rows: list[UdpSample]) -> None:
+        self.rows.extend(rows)
+
+    def flush(self) -> None:
+        if not self.rows:
+            return
+
+        conn = self.duckdb.connect(":memory:")
+        try:
+            conn.execute(f"CREATE TABLE udp_samples ({SCHEMA_COLUMNS})")
+            placeholders = ", ".join("?" for _ in INSERT_COLUMNS)
+            columns = ", ".join(INSERT_COLUMNS)
+            conn.executemany(
+                f"INSERT INTO udp_samples ({columns}) VALUES ({placeholders})",
+                [sample_values(row) for row in self.rows],
+            )
+            conn.execute(
+                "COPY udp_samples TO ? (FORMAT PARQUET)",
+                [str(self.path)],
+            )
+        finally:
+            conn.close()
+
+    def close(self) -> None:
+        self.flush()
+
+
 class ClickHouseHttpWriter:
     def __init__(self, url: str, table: str):
         self.url = url.rstrip("/")
