@@ -7,12 +7,73 @@
 Universal eBPF UDP traffic analyzer with Python user space, checkpointed storage,
 and a Docker/ffmpeg vertical harness.
 
+## What It Does
+
+`ebpf-udp-analyzer` monitors incoming IPv4 UDP traffic on a Linux interface.
+The eBPF program runs at `tc ingress` and updates in-kernel counters keyed by:
+
+- source IP
+- destination IP
+- source UDP port
+- destination UDP port
+- receiving interface
+
+The Python user-space collector periodically reads those counters, converts
+absolute eBPF map values into checkpoint deltas, optionally enriches rows with
+`/proc` socket/process metadata, and writes the result as JSON, tables, or
+storage rows.
+
+Example ingress row:
+
+```json
+{"src_ip": "1.1.1.1", "src_port": 53, "dst_ip": "146.59.19.215", "dst_port": 58417, "ifname": "eth0", "packets": 1, "bytes": 61, "layer": "ingress"}
+```
+
+With process enrichment enabled, matching UDP sockets can also produce delivered
+rows such as:
+
+```json
+{"process_name": "ffmpeg", "host_pid": 4242, "socket_id": 869157, "layer": "delivered"}
+```
+
 The project is intentionally split into:
 
 - eBPF hot path: collect UDP counters in kernel maps
 - Python checkpoint daemon: drain counters, enrich metadata, write batches
 - storage backends: local and networked history for later Python analysis
 - harness: reproducible Dockerized ffmpeg workload
+
+## Text Screenshots
+
+Dry-run table output:
+
+```text
+$ PYTHONPATH=src python3 -m udp_analyzer run --output table
+ts                        layer      src_ip      src_port  dst_ip         dst_port  ifname  process_name  host_pid  packets  bytes
+------------------------  ---------  ----------  --------  -------------  --------  ------  ------------  --------  -------  ------
+2026-07-06T22:51:31.000Z  delivered  192.0.2.10  40000     198.51.100.20  5000      eth0    ffmpeg        4242      101      132916
+2026-07-06T22:51:31.000Z  delivered  192.0.2.11  40010     198.51.100.20  5001      eth0    ffmpeg        4243      77       92400
+2026-07-06T22:51:31.000Z  ingress    192.0.2.12  40020     198.51.100.20  5999      eth0                  0         15       7680
+```
+
+Filtered JSON output:
+
+```text
+$ PYTHONPATH=src python3 -m udp_analyzer run --output json --process-name ffmpeg --layer delivered
+{"bytes": 132916, "dst_ip": "198.51.100.20", "dst_port": 5000, "ifname": "eth0", "layer": "delivered", "packets": 101, "process_name": "ffmpeg", "src_ip": "192.0.2.10", "src_port": 40000}
+{"bytes": 92400, "dst_ip": "198.51.100.20", "dst_port": 5001, "ifname": "eth0", "layer": "delivered", "packets": 77, "process_name": "ffmpeg", "src_ip": "192.0.2.11", "src_port": 40010}
+```
+
+Real eBPF ingress sample captured on Linux:
+
+```text
+$ INTERFACE=eth0 harness/run.sh ebpf
+ok: validated 1 rows from data/harness/udp_samples.ndjson
+output: data/harness/udp_samples.ndjson
+sqlite: data/harness/udp_samples.sqlite
+
+{"bytes": 61, "dst_ip": "146.59.19.215", "dst_port": 58417, "ifname": "eth0", "layer": "ingress", "packets": 1, "src_ip": "1.1.1.1", "src_port": 53}
+```
 
 ## Current Status
 
