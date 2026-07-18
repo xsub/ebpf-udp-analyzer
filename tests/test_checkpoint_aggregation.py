@@ -66,10 +66,8 @@ class CheckpointAggregationTests(unittest.TestCase):
         c.reader.batches.append([_entry(100, 131600), _entry(200, 263200),
                                  _entry(270, 355320)])
         first = c.read_checkpoint()
-        # first sight: previous=0, so the delta is the full 570 packets
-        self.assertEqual(len(first), 1)
-        self.assertEqual(first[0].packets, 570)
-        self.assertEqual(first[0].bytes, 131600 + 263200 + 355320)
+        # first sight only SEEDS the baseline — a cumulative total is not a rate
+        self.assertEqual(first, [])
 
         # tick 2: each entry advanced; the delta must be the SUM of the increments
         c.reader.batches.append([_entry(150, 197400), _entry(400, 526400),
@@ -77,6 +75,20 @@ class CheckpointAggregationTests(unittest.TestCase):
         second = c.read_checkpoint()
         self.assertEqual(len(second), 1)
         self.assertEqual(second[0].packets, (150 + 400 + 590) - 570)   # = 570
+        self.assertEqual(second[0].bytes, (197400 + 526400 + 776440)
+                                          - (131600 + 263200 + 355320))
+
+    def test_cumulative_total_is_never_reported_as_a_one_second_rate(self):
+        """The map outlives the process (tc program stays attached), so after a
+        restart the counters are huge. Emitting that as a delta once reported
+        348k pps for a ~570 pps channel."""
+        c = _collector()
+        c.reader.batches.append([_entry(2_000_000, 2_632_000_000)])   # hours of traffic
+        self.assertEqual(c.read_checkpoint(), [])                     # seed only
+        c.reader.batches.append([_entry(2_000_570, 2_632_750_120)])   # +570 in 1s
+        rows = c.read_checkpoint()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].packets, 570)                        # a REAL rate
 
     def test_no_traffic_emits_nothing(self):
         c = _collector()
@@ -97,16 +109,21 @@ class CheckpointAggregationTests(unittest.TestCase):
         # and when the same 5-tuple returns, its counters restart from 0 without
         # producing a bogus negative delta
         c.reader.batches.append([_entry(42, 55272)])
+        self.assertEqual(c.read_checkpoint(), [])       # re-seeded, not reported
+        c.reader.batches.append([_entry(99, 130284)])
         again = c.read_checkpoint()
         self.assertEqual(len(again), 1)
-        self.assertEqual(again[0].packets, 42)
+        self.assertEqual(again[0].packets, 57)
 
     def test_distinct_flows_stay_separate(self):
         c = _collector()
         c.reader.batches.append([_entry(100, 131600, dst_port=5000),
                                  _entry(300, 394800, dst_port=5001)])
+        self.assertEqual(c.read_checkpoint(), [])       # seed both
+        c.reader.batches.append([_entry(110, 144760, dst_port=5000),
+                                 _entry(330, 434280, dst_port=5001)])
         rows = c.read_checkpoint()
-        self.assertEqual(sorted(r.packets for r in rows), [100, 300])
+        self.assertEqual(sorted(r.packets for r in rows), [10, 30])
 
 
 if __name__ == "__main__":

@@ -278,8 +278,19 @@ class EbpfIngressCollector:
 
         for identity, counters in totals.items():
             entry = first_entry[identity]
+            known = identity in self.previous
             previous = self.previous.get(identity, UdpMapCounters(packets=0, bytes=0))
             self.previous[identity] = counters
+
+            # FIRST sight of a flow: only SEED the baseline, never emit.
+            # The BPF map counts cumulatively and OUTLIVES this process — the tc
+            # program stays attached across a userspace restart. Treating that
+            # cumulative total as a delta reported ~10 minutes of traffic as if it
+            # happened in one 1000 ms bucket (observed: 348k pps / 3.6 Gb/s for a
+            # channel really doing ~570 pps / 6 Mb/s — a ~600x overstatement, once
+            # per restart). A rate needs two observations; we have one.
+            if not known:
+                continue
 
             packet_delta = counters.packets - previous.packets
             byte_delta = counters.bytes - previous.bytes
