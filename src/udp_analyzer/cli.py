@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import time
 from pathlib import Path
 from typing import Optional, Union
@@ -108,19 +109,40 @@ def run_analyzer(args: argparse.Namespace) -> None:
     watch = args.watch or args.duration is not None
     deadline = time.monotonic() + args.duration if args.duration is not None else None
 
+    # Run under systemd, `systemctl stop` sends SIGTERM, whose DEFAULT action kills
+    # the process outright — `finally` never runs, so collector.close() never detaches
+    # the tc filter. The BPF program then stays attached to the interface with nobody
+    # reading it: it keeps running on every packet, and its map survives (we found one
+    # orphaned and saturated at 65536/65536 long after the service was 'inactive').
+    # Translating the signal into a normal exception lets the `finally` clean up.
+    stopping = False
+
+    def _on_signal(signum, _frame):
+        nonlocal stopping
+        stopping = True
+        raise KeyboardInterrupt(f"signal {signum}")
+
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(_sig, _on_signal)
+        except (ValueError, OSError):
+            pass                     # not the main thread / unsupported — best effort
+
     try:
         while True:
             samples = collector.read_checkpoint()
             emit_samples(samples, args.output)
             writer.write_samples(samples)
 
-            if not watch:
+            if not watch or stopping:
                 break
             if deadline is not None and time.monotonic() >= deadline:
                 break
             time.sleep(args.bucket_ms / 1000)
+    except KeyboardInterrupt:
+        pass                         # clean shutdown: fall through to `finally`
     finally:
-        collector.close()
+        collector.close()            # detaches the tc filter (detach_on_close)
         writer.flush()
         writer.close()
 

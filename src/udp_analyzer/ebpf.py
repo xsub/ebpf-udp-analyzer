@@ -252,13 +252,37 @@ class EbpfIngressCollector:
         bucket_ns = bucket_start_ns(time.time_ns(), self.bucket_ms)
         samples: list[UdpSample] = []
 
+        # AGGREGATE BY IDENTITY FIRST, then diff — never per raw map entry.
+        # identity() deliberately ignores the key's padding bytes, so several map
+        # entries can share one identity. Diffing per entry made `self.previous`
+        # get overwritten by each duplicate in turn, so the "delta" was the
+        # difference between two UNRELATED counters — it telescoped to noise
+        # (rows of 1-2 packets for a 570 pps channel). Summing first is also
+        # simply correct for a PERCPU map read that may split a flow.
+        totals: dict[tuple, UdpMapCounters] = {}
+        first_entry: dict[tuple, object] = {}
         for entry in self.reader.dump_entries():
             identity = entry.key.identity()
-            previous = self.previous.get(identity, UdpMapCounters(packets=0, bytes=0))
-            self.previous[identity] = entry.counters
+            acc = totals.get(identity)
+            totals[identity] = UdpMapCounters(
+                packets=(acc.packets if acc else 0) + entry.counters.packets,
+                bytes=(acc.bytes if acc else 0) + entry.counters.bytes,
+            )
+            first_entry.setdefault(identity, entry)
 
-            packet_delta = entry.counters.packets - previous.packets
-            byte_delta = entry.counters.bytes - previous.bytes
+        # a flow that vanished from the map is gone for good (a re-created entry
+        # restarts at 0); dropping it keeps `previous` bounded and avoids a bogus
+        # negative delta if the same 5-tuple comes back.
+        for stale in set(self.previous) - set(totals):
+            del self.previous[stale]
+
+        for identity, counters in totals.items():
+            entry = first_entry[identity]
+            previous = self.previous.get(identity, UdpMapCounters(packets=0, bytes=0))
+            self.previous[identity] = counters
+
+            packet_delta = counters.packets - previous.packets
+            byte_delta = counters.bytes - previous.bytes
             if packet_delta <= 0 and byte_delta <= 0:
                 continue
 
