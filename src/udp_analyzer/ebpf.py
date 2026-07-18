@@ -249,8 +249,25 @@ class EbpfIngressCollector:
         self.reader.refresh_map_id()
 
     def read_checkpoint(self) -> list[UdpSample]:
-        bucket_ns = bucket_start_ns(time.time_ns(), self.bucket_ms)
+        now_ns = time.time_ns()
+        bucket_ns = bucket_start_ns(now_ns, self.bucket_ms)
         samples: list[UdpSample] = []
+
+        # MEASURE the interval, don't assume it. The loop is
+        #   read_checkpoint() -> emit -> sleep(bucket_ms)
+        # and read_checkpoint is NOT free: it shells out to `bpftool map dump` and
+        # (with --enrich-processes) scans /proc to map sockets to pids. So the real
+        # period is `work + bucket_ms`, which on a busy recorder was ~12 s while we
+        # still labelled every sample bucket_ms=1000 — a 12x UNDERSTATEMENT of every
+        # rate (25 TV channels reported 12.5 Mb/s instead of ~150 Mb/s).
+        # Consumers divide packets/bytes by bucket_ms, so report the elapsed time.
+        previous_ns = getattr(self, "_last_checkpoint_ns", None)
+        self._last_checkpoint_ns = now_ns
+        elapsed_ms = self.bucket_ms
+        if previous_ns is not None:
+            measured = (now_ns - previous_ns) // 1_000_000
+            if measured > 0:
+                elapsed_ms = int(measured)
 
         # AGGREGATE BY IDENTITY FIRST, then diff — never per raw map entry.
         # identity() deliberately ignores the key's padding bytes, so several map
@@ -299,7 +316,7 @@ class EbpfIngressCollector:
 
             sample = UdpSample(
                 bucket_start_ns=bucket_ns,
-                bucket_ms=self.bucket_ms,
+                bucket_ms=elapsed_ms,          # MEASURED, not assumed (see above)
                 src_ip=entry.key.src_ip,
                 dst_ip=entry.key.dst_ip,
                 src_port=entry.key.src_port,

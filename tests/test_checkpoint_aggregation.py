@@ -115,6 +115,29 @@ class CheckpointAggregationTests(unittest.TestCase):
         self.assertEqual(len(again), 1)
         self.assertEqual(again[0].packets, 57)
 
+    def test_bucket_ms_reports_the_MEASURED_interval(self):
+        """read_checkpoint is slow (bpftool dump + /proc scan), so the real period is
+        `work + sleep`. Labelling every sample bucket_ms=1000 understated every rate
+        by that factor — on the recorder ~12x (12.5 Mb/s reported for ~150 Mb/s)."""
+        import time as _t
+
+        c = _collector()
+        c.reader.batches.append([_entry(1000, 1316000)])
+        c.read_checkpoint()                                   # seed
+        real = _t.time_ns
+        try:                                                  # pretend 12 s elapsed
+            base = real()
+            _t.time_ns = lambda: base + 12_000_000_000
+            c.reader.batches.append([_entry(1000 + 6840, 1316000 + 9001440)])
+            rows = c.read_checkpoint()
+        finally:
+            _t.time_ns = real
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].packets, 6840)               # raw delta unchanged
+        self.assertEqual(rows[0].bucket_ms, 12_000)           # ...over 12 s, not 1 s
+        # the consumer divides by bucket_ms -> it now sees the REAL rate, not 1/12 of it
+        self.assertAlmostEqual(rows[0].packets / (rows[0].bucket_ms / 1000), 570.0)
+
     def test_distinct_flows_stay_separate(self):
         c = _collector()
         c.reader.batches.append([_entry(100, 131600, dst_port=5000),
