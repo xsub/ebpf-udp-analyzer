@@ -198,9 +198,31 @@ class BpftoolMapReader:
             )
 
         newest = sorted(candidates, key=lambda item: int(item.get("id", 0)))[-1]
-        map_ids = newest.get("map_ids") or []
-        self.map_id = int(map_ids[0])
-        return self.map_id
+        map_ids = [int(m) for m in (newest.get("map_ids") or [])]
+
+        # Pick the map BY NAME. `map_ids[0]` worked only while the program owned
+        # exactly one map; the drop-reason array added a second one and turned this
+        # into a coin flip. Losing that flip is SILENT in the worst way: the counters
+        # map has a 20-byte key parsed with '<BBHH2xIII', the array key has 4, so the
+        # analyzer died on every checkpoint with
+        #     error: unexpected udp_key size from bpftool: 4
+        # and systemd restarted it 220 times while the kernel counted 126 Mb/s.
+        # `self.map_name` already existed and was simply never consulted here.
+        #
+        # Compare TRUNCATED: the kernel caps map names at BPF_OBJ_NAME_LEN-1 = 15,
+        # so 'udp_ingress_counters' reaches userspace as 'udp_ingress_cou'.
+        wanted = self.map_name[:15]
+        maps = self.runner.run_json(["bpftool", "-j", "map", "show"], sudo=True) or []
+        names = {int(m["id"]): str(m.get("name", "")) for m in maps if "id" in m}
+        for map_id in map_ids:
+            if names.get(map_id, "") == wanted:
+                self.map_id = map_id
+                return map_id
+
+        raise RuntimeError(
+            f"program {self.program_name!r} owns maps "
+            f"{[(i, names.get(i, '?')) for i in map_ids]}, none named {wanted!r}"
+        )
 
     def dump_entries(self) -> list[UdpMapEntry]:
         map_id = self.map_id or self.refresh_map_id()
