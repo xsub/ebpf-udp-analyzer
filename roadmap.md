@@ -14,12 +14,14 @@ Implemented:
 - checkpoint deltas from absolute per-CPU BPF counters
 - SQLite, DuckDB, Parquet, and ClickHouse writer interfaces
 - process/socket enrichment from `/proc` by local UDP port and socket inode
+  as a heuristic delivered layer
 - dry-run and eBPF harness runners with JSON assertions
 - CloudLinux/RHEL and Ubuntu/Debian bootstrap scripts
 
 Still open:
 
-- exact receive-side attribution by socket cookie or kprobe/fentry
+- receive-side socket-cookie attribution with `fentry` preferred and `kprobe`
+  fallback
 - full Dockerized ffmpeg automated vertical with real containers
 - robust same-port multi-process support such as `SO_REUSEPORT` or multicast
 - production-grade retention/rollover for Parquet and remote databases
@@ -109,6 +111,35 @@ Done when:
 - traffic delivered to different processes can be separated
 - process identity remains understandable after namespace translation
 - traffic to unopened UDP ports is not falsely attributed to a process
+
+Current status: the implemented `/proc` enrichment is a port-based heuristic. It
+can label simple delivered rows, but it is not exact receive-side attribution.
+
+## Phase 3A: Receive-Side Socket Cookies
+
+Goal: replace heuristic delivered attribution with kernel receive-side
+attribution keyed by the socket selected by UDP demultiplexing.
+
+Implementation direction:
+
+- prefer `fentry` on a UDP receive-path function that exposes the selected
+  `struct sock *` and packet context
+- fall back to `kprobe` when `fentry` or BTF is unavailable but a usable kernel
+  symbol exists
+- use socket cookie as the stable socket identifier
+- key the delivered map by socket cookie plus UDP 5-tuple
+- keep current `/proc` local-port enrichment as a legacy/fallback mode
+- map socket cookie to process, host PID, container PID, container ID, and
+  network namespace from user space
+
+Done when:
+
+- delivered rows are emitted from receive-side counters rather than local-port
+  correlation
+- two sockets sharing one UDP port can be counted separately
+- unopened-port traffic remains ingress-only and is not labeled delivered
+- unsupported kernels fail with actionable messages and can fall back to legacy
+  enrichment when requested
 
 ## Phase 4: Dockerized ffmpeg Vertical
 

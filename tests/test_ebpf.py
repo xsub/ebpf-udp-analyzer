@@ -17,7 +17,7 @@ class EbpfParserTests(unittest.TestCase):
                 "dst_port": 5000,
                 "ifindex": 2,
                 "src_ip4": 0x0A0200C0,
-                "dst_ip4": 0x140064C6,
+                "dst_ip4": 0x146433C6,
             },
             "values": [
                 {"cpu": 0, "value": {"packets": 5, "bytes": 500}},
@@ -28,7 +28,7 @@ class EbpfParserTests(unittest.TestCase):
         parsed = parse_bpftool_entry(entry)
 
         self.assertEqual(parsed.key.src_ip, "192.0.2.10")
-        self.assertEqual(parsed.key.dst_ip, "198.100.0.20")
+        self.assertEqual(parsed.key.dst_ip, "198.51.100.20")
         self.assertEqual(parsed.key.src_port, 40000)
         self.assertEqual(parsed.key.dst_port, 5000)
         self.assertEqual(parsed.counters.packets, 12)
@@ -53,8 +53,8 @@ class EbpfParserTests(unittest.TestCase):
             "0x02",
             "0x0a",
             "0xc6",
+            "0x33",
             "0x64",
-            "0x00",
             "0x14",
         ]
 
@@ -66,7 +66,7 @@ class EbpfParserTests(unittest.TestCase):
         self.assertEqual(parsed.dst_port, 5000)
         self.assertEqual(parsed.ifindex, 2)
         self.assertEqual(parsed.src_ip, "192.0.2.10")
-        self.assertEqual(parsed.dst_ip, "198.100.0.20")
+        self.assertEqual(parsed.dst_ip, "198.51.100.20")
 
     def test_ipv4_from_bpf_int_uses_packet_byte_order(self):
         self.assertEqual(ipv4_from_bpf_int(0x0A0200C0), "192.0.2.10")
@@ -74,4 +74,3 @@ class EbpfParserTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -24,7 +24,7 @@ def _entry(packets, bytes_, *, src_port=40000, dst_port=5000):
         "key": {
             "family": 2, "ip_proto": 17,
             "src_port": src_port, "dst_port": dst_port, "ifindex": 2,
-            "src_ip4": 0x0A0200C0, "dst_ip4": 0x140064C6,
+            "src_ip4": 0x0A0200C0, "dst_ip4": 0x146433C6,
         },
         "values": [{"cpu": 0, "value": {"packets": packets, "bytes": bytes_}}],
     }

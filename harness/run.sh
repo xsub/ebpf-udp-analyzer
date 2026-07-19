@@ -50,6 +50,13 @@ elif [ "$collector" = "ebpf" ]; then
 
     if [ "${GENERATE_DNS:-1}" = "1" ]; then
         sleep 1
+        dns_target="${DNS_TARGET:-}"
+        if [ -z "$dns_target" ]; then
+            dns_target="$(awk '$1 == "nameserver" && $2 ~ /^[0-9.]+$/ {print $2; exit}' /etc/resolv.conf 2>/dev/null || true)"
+        fi
+        if [ -z "$dns_target" ]; then
+            dns_target="192.0.2.53"
+        fi
         python3 -c 'import random,socket,sys
 target = sys.argv[1]
 name = sys.argv[2]
@@ -60,7 +67,7 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sock.settimeout(3)
 sock.sendto(query, (target, 53))
 sock.recvfrom(512)
-' "${DNS_TARGET:-1.1.1.1}" "${DNS_NAME:-example.com}" || true
+' "$dns_target" "${DNS_NAME:-example.com}" || true
     fi
 
     wait "$analyzer_pid"

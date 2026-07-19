@@ -26,7 +26,7 @@ storage rows.
 Example ingress row:
 
 ```json
-{"src_ip": "1.1.1.1", "src_port": 53, "dst_ip": "146.59.19.215", "dst_port": 58417, "ifname": "eth0", "packets": 1, "bytes": 61, "layer": "ingress"}
+{"src_ip": "203.0.113.53", "src_port": 53, "dst_ip": "198.51.100.20", "dst_port": 58417, "ifname": "eth0", "packets": 1, "bytes": 61, "layer": "ingress"}
 ```
 
 With process enrichment enabled, matching UDP sockets can also produce delivered
@@ -35,6 +35,21 @@ rows such as:
 ```json
 {"process_name": "ffmpeg", "host_pid": 4242, "socket_id": 869157, "layer": "delivered"}
 ```
+
+Current delivered rows are a best-effort `/proc` enrichment: the collector
+matches ingress UDP samples to sockets by local destination port and local
+address. This is useful for simple one-socket-per-port workloads, but it is a
+heuristic until receive-side socket-cookie attribution is enabled. It cannot
+prove that the kernel delivered a specific packet to a specific socket when
+multiple sockets share a port, when multicast fanout is involved, or when socket
+state changes between packet capture and `/proc` scanning.
+
+The next attribution target is a receive-side delivered map keyed by socket
+cookie plus the UDP 5-tuple. The preferred attach point is `fentry` on a UDP
+receive-path function that has both the selected `struct sock *` and packet
+context; `kprobe` is the compatibility fallback. The existing port-based
+enrichment will remain available as a legacy/fallback mode for kernels where the
+receive-side hook is unavailable.
 
 The project is intentionally split into:
 
@@ -64,7 +79,7 @@ $ PYTHONPATH=src python3 -m udp_analyzer run --output json --process-name ffmpeg
 {"bytes": 92400, "dst_ip": "198.51.100.20", "dst_port": 5001, "ifname": "eth0", "layer": "delivered", "packets": 77, "process_name": "ffmpeg", "src_ip": "192.0.2.11", "src_port": 40010}
 ```
 
-Real eBPF ingress sample captured on Linux:
+Anonymized eBPF ingress sample captured on Linux:
 
 ```text
 $ INTERFACE=eth0 harness/run.sh ebpf
@@ -72,7 +87,7 @@ ok: validated 1 rows from data/harness/udp_samples.ndjson
 output: data/harness/udp_samples.ndjson
 sqlite: data/harness/udp_samples.sqlite
 
-{"bytes": 61, "dst_ip": "146.59.19.215", "dst_port": 58417, "ifname": "eth0", "layer": "ingress", "packets": 1, "src_ip": "1.1.1.1", "src_port": 53}
+{"bytes": 61, "dst_ip": "198.51.100.20", "dst_port": 58417, "ifname": "eth0", "layer": "ingress", "packets": 1, "src_ip": "203.0.113.53", "src_port": 53}
 ```
 
 ## Current Status
@@ -90,13 +105,15 @@ Implemented now:
 - first eBPF C program for IPv4 UDP ingress counters at `tc` classifier attach
 - eBPF collector that attaches with `tc`, drains counters with `bpftool`, and
   emits checkpoint deltas
-- optional `/proc` socket/process enrichment for delivered-process rows
+- optional `/proc` socket/process enrichment for heuristic delivered-process
+  rows
 - basic Docker/ffmpeg harness files
 
 Next implementation step:
 
-- extend process attribution beyond local-port correlation with receive-side
-  socket cookies or kprobe/fentry attribution
+- implement receive-side socket-cookie attribution with `fentry` preferred,
+  `kprobe` fallback, and a delivered counter key of socket cookie plus UDP
+  5-tuple
 
 ## Quick Start
 
@@ -187,7 +204,7 @@ PYTHONPATH=src python3 -m udp_analyzer run \
   --output json
 ```
 
-Add process/socket enrichment from `/proc`:
+Add legacy heuristic process/socket enrichment from `/proc`:
 
 ```sh
 PYTHONPATH=src python3 -m udp_analyzer run \
@@ -199,7 +216,7 @@ PYTHONPATH=src python3 -m udp_analyzer run \
   --enrich-processes
 ```
 
-Filter enriched rows to one process name:
+Filter legacy enriched rows to one process name:
 
 ```sh
 PYTHONPATH=src python3 -m udp_analyzer run \
